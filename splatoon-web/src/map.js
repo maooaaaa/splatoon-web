@@ -50,6 +50,21 @@ export class GameMap {
         this.walls = [];
         this.platforms = [];
         this.wallMeshes = [];
+        
+        // Dirty flags for batched texture updates
+        this.paintTexDirty = false;
+        this.wallTexDirty = new Set();
+        
+        // Spatial partitioning grid
+        this.gridSize = 8; // 8 units per cell
+        this.gridCols = Math.ceil(this.width / this.gridSize);
+        this.gridRows = Math.ceil(this.height / this.gridSize);
+        this.wallGrid = Array(this.gridRows).fill(null).map(() => 
+            Array(this.gridCols).fill(null).map(() => [])
+        );
+        this.platformGrid = Array(this.gridRows).fill(null).map(() => 
+            Array(this.gridCols).fill(null).map(() => [])
+        );
     }
 
     build() {
@@ -151,6 +166,7 @@ export class GameMap {
         lowPlatRects.forEach(r => buildBlock(r, LOW_PLAT_H, false));
         highPlatRects.forEach(r => buildBlock(r, HIGH_PLAT_H, false));
 
+        this._buildSpatialGrid();
         this._addDecorations();
     }
 
@@ -202,24 +218,58 @@ export class GameMap {
         const s = new THREE.Mesh(stripGeo, stripMat); s.position.set(this.width * 0.5, 0.01, this.height * 0.5); this.scene.add(s);
     }
 
+    _buildSpatialGrid() {
+        // Populate spatial grid for faster collision detection
+        for (const w of this.walls) {
+            const minGridX = Math.max(0, Math.floor(w.minX / this.gridSize));
+            const maxGridX = Math.min(this.gridCols - 1, Math.floor(w.maxX / this.gridSize));
+            const minGridZ = Math.max(0, Math.floor(w.minZ / this.gridSize));
+            const maxGridZ = Math.min(this.gridRows - 1, Math.floor(w.maxZ / this.gridSize));
+            
+            for (let gz = minGridZ; gz <= maxGridZ; gz++) {
+                for (let gx = minGridX; gx <= maxGridX; gx++) {
+                    this.wallGrid[gz][gx].push(w);
+                }
+            }
+        }
+        
+        for (const p of this.platforms) {
+            const minGridX = Math.max(0, Math.floor(p.minX / this.gridSize));
+            const maxGridX = Math.min(this.gridCols - 1, Math.floor(p.maxX / this.gridSize));
+            const minGridZ = Math.max(0, Math.floor(p.minZ / this.gridSize));
+            const maxGridZ = Math.min(this.gridRows - 1, Math.floor(p.maxZ / this.gridSize));
+            
+            for (let gz = minGridZ; gz <= maxGridZ; gz++) {
+                for (let gx = minGridX; gx <= maxGridX; gx++) {
+                    this.platformGrid[gz][gx].push(p);
+                }
+            }
+        }
+    }
+
     paintAt(wx, wz, tid, rad) {
         const px = (wx / this.width) * this.pw, py = (wz / this.height) * this.ph;
         const pr = (rad / this.width) * this.pw;
         const col = TEAM_COLORS[tid]; if (!col) return;
         this.pctx.fillStyle = `rgb(${col.r},${col.g},${col.b})`;
         this.pctx.beginPath(); this.pctx.arc(px, py, pr, 0, Math.PI * 2); this.pctx.fill();
-        // Reduced splatter iterations for perf
+        // Reduced splatter iterations for perf with step size 2
         const r2 = pr * 1.5;
         const x0 = Math.max(0, Math.floor(px - r2)), x1 = Math.min(this.pw - 1, Math.ceil(px + r2));
         const y0 = Math.max(0, Math.floor(py - r2)), y1 = Math.min(this.ph - 1, Math.ceil(py + r2));
-        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        for (let y = y0; y <= y1; y += 2) for (let x = x0; x <= x1; x += 2) {
             if ((x - px) ** 2 + (y - py) ** 2 < r2 * r2) {
                 const tr = Math.floor(y / PR), tc = Math.floor(x / PR);
-                if (tr >= 0 && tr < this.rows && tc >= 0 && tc < this.cols && LAYOUT[tr][tc] !== 1)
+                if (tr >= 0 && tr < this.rows && tc >= 0 && tc < this.cols && LAYOUT[tr][tc] !== 1) {
                     this.paintData[y * this.pw + x] = tid;
+                    // Also fill adjacent pixel for step size 2
+                    if (x + 1 < this.pw) this.paintData[y * this.pw + x + 1] = tid;
+                    if (y + 1 < this.ph) this.paintData[(y + 1) * this.pw + x] = tid;
+                    if (x + 1 < this.pw && y + 1 < this.ph) this.paintData[(y + 1) * this.pw + x + 1] = tid;
+                }
             }
         }
-        this.paintTex.needsUpdate = true;
+        this.paintTexDirty = true;
     }
 
     paintWallAt(wx, wy, wz, tid, rad) {
@@ -250,7 +300,7 @@ export class GameMap {
 
                         w.ctx.fillStyle = colorStr;
                         w.ctx.beginPath(); w.ctx.arc(u, v, pr, 0, Math.PI * 2); w.ctx.fill();
-                        w.tex.needsUpdate = true;
+                        this.wallTexDirty.add(w);
                         hit = true;
                     }
                 }
@@ -260,6 +310,20 @@ export class GameMap {
         // Just paint both arrays
         check(this.walls);
         check(this.platforms);
+    }
+
+    flushPaint() {
+        // Batch texture updates
+        if (this.paintTexDirty) {
+            this.paintTex.needsUpdate = true;
+            this.paintTexDirty = false;
+        }
+        
+        // Update wall textures
+        for (const w of this.wallTexDirty) {
+            w.tex.needsUpdate = true;
+        }
+        this.wallTexDirty.clear();
     }
 
     getTeamAt(wx, wz) {
@@ -277,14 +341,28 @@ export class GameMap {
 
     getGroundY(wx, wz, playerY = 100, velY = 0) {
         let bestY = 0;
-        for (const p of this.platforms) {
-            if (wx >= p.minX && wx <= p.maxX && wz >= p.minZ && wz <= p.maxZ) {
-                if (playerY >= p.topY - 0.8) bestY = Math.max(bestY, p.topY);
-            }
-        }
-        for (const w of this.walls) {
-            if (wx >= w.minX && wx <= w.maxX && wz >= w.minZ && wz <= w.maxZ) {
-                if (playerY >= w.topY - 0.8) bestY = Math.max(bestY, w.topY);
+        
+        // Use spatial grid for faster lookup
+        const gx = Math.max(0, Math.min(this.gridCols - 1, Math.floor(wx / this.gridSize)));
+        const gz = Math.max(0, Math.min(this.gridRows - 1, Math.floor(wz / this.gridSize)));
+        
+        // Check platforms in this grid cell and adjacent cells
+        for (let dz = -1; dz <= 1; dz++) {
+            for (let dx = -1; dx <= 1; dx++) {
+                const cgx = gx + dx;
+                const cgz = gz + dz;
+                if (cgx >= 0 && cgx < this.gridCols && cgz >= 0 && cgz < this.gridRows) {
+                    for (const p of this.platformGrid[cgz][cgx]) {
+                        if (wx >= p.minX && wx <= p.maxX && wz >= p.minZ && wz <= p.maxZ) {
+                            if (playerY >= p.topY - 0.8) bestY = Math.max(bestY, p.topY);
+                        }
+                    }
+                    for (const w of this.wallGrid[cgz][cgx]) {
+                        if (wx >= w.minX && wx <= w.maxX && wz >= w.minZ && wz <= w.maxZ) {
+                            if (playerY >= w.topY - 0.8) bestY = Math.max(bestY, w.topY);
+                        }
+                    }
+                }
             }
         }
         return bestY;
@@ -302,19 +380,33 @@ export class GameMap {
 
     collideWalls(x, z, rad) {
         let nx = x, nz = z;
-        for (const w of this.walls) {
-            const cx = Math.max(w.minX, Math.min(nx, w.maxX));
-            const cz = Math.max(w.minZ, Math.min(nz, w.maxZ));
-            const dx = nx - cx, dz = nz - cz, d = Math.sqrt(dx * dx + dz * dz);
-            if (d < rad && d > 0.001) {
-                const o = rad - d; nx += (dx / d) * o; nz += (dz / d) * o;
-            } else if (d <= 0.001) {
-                // Inside
-                const dL = Math.abs(nx - w.minX), dR = Math.abs(nx - w.maxX);
-                const dT = Math.abs(nz - w.minZ), dB = Math.abs(nz - w.maxZ);
-                const min = Math.min(dL, dR, dT, dB);
-                if (min === dL) nx = w.minX - rad; else if (min === dR) nx = w.maxX + rad;
-                else if (min === dT) nz = w.minZ - rad; else nz = w.maxZ + rad;
+        
+        // Use spatial grid for faster lookup
+        const gx = Math.max(0, Math.min(this.gridCols - 1, Math.floor(x / this.gridSize)));
+        const gz = Math.max(0, Math.min(this.gridRows - 1, Math.floor(z / this.gridSize)));
+        
+        // Check walls in this grid cell and adjacent cells
+        for (let dz = -1; dz <= 1; dz++) {
+            for (let dx = -1; dx <= 1; dx++) {
+                const cgx = gx + dx;
+                const cgz = gz + dz;
+                if (cgx >= 0 && cgx < this.gridCols && cgz >= 0 && cgz < this.gridRows) {
+                    for (const w of this.wallGrid[cgz][cgx]) {
+                        const cx = Math.max(w.minX, Math.min(nx, w.maxX));
+                        const cz = Math.max(w.minZ, Math.min(nz, w.maxZ));
+                        const dx = nx - cx, dz = nz - cz, d = Math.sqrt(dx * dx + dz * dz);
+                        if (d < rad && d > 0.001) {
+                            const o = rad - d; nx += (dx / d) * o; nz += (dz / d) * o;
+                        } else if (d <= 0.001) {
+                            // Inside
+                            const dL = Math.abs(nx - w.minX), dR = Math.abs(nx - w.maxX);
+                            const dT = Math.abs(nz - w.minZ), dB = Math.abs(nz - w.maxZ);
+                            const min = Math.min(dL, dR, dT, dB);
+                            if (min === dL) nx = w.minX - rad; else if (min === dR) nx = w.maxX + rad;
+                            else if (min === dT) nz = w.minZ - rad; else nz = w.maxZ + rad;
+                        }
+                    }
+                }
             }
         }
         return { x: nx, z: nz };
@@ -323,13 +415,14 @@ export class GameMap {
     reset() {
         this.paintData.fill(0);
         this.pctx.clearRect(0, 0, this.pw, this.ph);
-        this.paintTex.needsUpdate = true;
+        this.paintTexDirty = true;
         const resetBlock = (arr) => arr.forEach(b => {
             b.ctx.fillStyle = b.mesh.material.color.getStyle();
             b.ctx.fillRect(0, 0, b.canvas.width, b.canvas.height);
-            b.tex.needsUpdate = true;
+            this.wallTexDirty.add(b);
         });
         resetBlock(this.walls);
         resetBlock(this.platforms);
+        this.flushPaint();
     }
 }
