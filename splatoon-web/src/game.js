@@ -165,24 +165,14 @@ export class Game {
         }
 
         // Projectiles + hit detection
+        // First update projectiles (which removes dead ones from list)
         this.ink.update(dt, this.map);
 
-        // Use index-based iteration instead of spread copy
+        // Then check collisions on remaining alive projectiles
+        // Note: iterate backwards in case we need to remove during iteration
         for (let i = this.ink.list.length - 1; i >= 0; i--) {
             const pr = this.ink.list[i];
-            if (!pr.alive) {
-                // If it was a bomb that exploded/died
-                if (pr.isBomb && pr.hitPos) {
-                    this.particles.spawnBombExplosion(pr.hitPos, pr.tid);
-                    this.audio.playSplat();
-                    // Bomb splash damage
-                    this._checkExplosion(pr.hitPos, pr.tid, 120, 3.0);
-                } else if (pr.hitPos) {
-                    this.particles.spawnLandingSplash(pr.hitPos, pr.tid, 4);
-                    this.audio.playSplat();
-                }
-                continue;
-            }
+            if (!pr.alive) continue; // Skip already dead projectiles
 
             // Check direct hits for Projectiles
             if (!pr.isBomb) {
@@ -199,6 +189,23 @@ export class Game {
                         pr.destroy();
                         break;
                     }
+                }
+            }
+        }
+
+        // Handle projectile hit effects after iteration
+        // Check which projectiles died this frame and spawn effects
+        for (let i = this.ink.list.length - 1; i >= 0; i--) {
+            const pr = this.ink.list[i];
+            if (!pr.alive && pr.hitPos) {
+                if (pr.isBomb) {
+                    this.particles.spawnBombExplosion(pr.hitPos, pr.tid);
+                    this.audio.playSplat();
+                    // Bomb splash damage
+                    this._checkExplosion(pr.hitPos, pr.tid, 120, 3.0);
+                } else {
+                    this.particles.spawnLandingSplash(pr.hitPos, pr.tid, 4);
+                    this.audio.playSplat();
                 }
             }
         }

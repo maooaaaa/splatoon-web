@@ -394,9 +394,9 @@ export class GameMap {
                     for (const w of this.wallGrid[cgz][cgx]) {
                         const cx = Math.max(w.minX, Math.min(nx, w.maxX));
                         const cz = Math.max(w.minZ, Math.min(nz, w.maxZ));
-                        const dx = nx - cx, dz = nz - cz, d = Math.sqrt(dx * dx + dz * dz);
+                        const deltaX = nx - cx, deltaZ = nz - cz, d = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
                         if (d < rad && d > 0.001) {
-                            const o = rad - d; nx += (dx / d) * o; nz += (dz / d) * o;
+                            const o = rad - d; nx += (deltaX / d) * o; nz += (deltaZ / d) * o;
                         } else if (d <= 0.001) {
                             // Inside
                             const dL = Math.abs(nx - w.minX), dR = Math.abs(nx - w.maxX);
