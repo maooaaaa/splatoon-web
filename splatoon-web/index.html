@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SplatZone - 3D Ink Battle</title>
+    <link rel="stylesheet" href="src/style.css?v=3" />
+    <script type="importmap">
+  { "imports": { "three": "https://esm.sh/three@0.160.0" } }
+  </script>
+</head>
+
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        <div id="hud" class="hidden">
+            <div id="timer">1:30</div>
+            <div id="score-bar">
+                <div id="score-team1"></div>
+                <div id="score-team2"></div>
+            </div>
+            <div id="hp-bar-container">
+                <div id="hp-bar">
+                    <div id="hp-fill"></div>
+                </div>
+                <span id="hp-text">100</span>
+            </div>
+            <div id="ink-tank">
+                <div id="ink-level"></div>
+            </div>
+            <div id="crosshair">
+                <div class="crosshair-dot"></div>
+                <div class="crosshair-ring"></div>
+            </div>
+            <div id="hit-marker" class="hidden">
+                <div class="hit-x"></div>
+            </div>
+            <div id="charge-bar" class="hidden">
+                <div id="charge-fill"></div>
+            </div>
+            <div id="squid-indicator" class="hidden">🦑 イカ潜伏中</div>
+            <div id="special-gauge">
+                <div id="special-fill"></div>
+                <span id="special-text">SPECIAL</span>
+            </div>
+            <canvas id="minimap" width="180" height="120"></canvas>
+            <div id="kill-feed"></div>
+            <div id="weapon-indicator"></div>
+            <div id="kd-display">K:0 / D:0</div>
+            <div id="respawn-overlay" class="hidden">
+                <span id="respawn-text">RESPAWN</span>
+                <span id="respawn-timer">3</span>
+            </div>
+        </div>
+        <div id="damage-flash"></div>
+        <div id="title-screen">
+            <div class="title-bg"></div>
+            <div class="home-content">
+                <div class="home-logo">
+                    <h1 class="title-text">SPLAT<span class="title-accent">ZONE</span></h1>
+                    <p class="title-subtitle">INK BATTLE ARENA</p>
+                    <div class="ink-drip"></div>
+                </div>
+                <div class="home-menu">
+                    <button id="start-btn" class="neon-btn main-btn">
+                        <span class="btn-icon">🎯</span> バトル開始
+                    </button>
+                    <button id="controls-btn" class="neon-btn sub-btn">
+                        <span class="btn-icon">🎮</span> 操作説明
+                    </button>
+                </div>
+                <div class="home-weapon-preview">
+                    <div class="weapon-card">
+                        <div class="weapon-icon">🔫</div>
+                        <div class="weapon-name">シューター</div>
+                        <div class="weapon-desc">バランス型</div>
+                    </div>
+                    <div class="weapon-card">
+                        <div class="weapon-icon">🖌️</div>
+                        <div class="weapon-name">ローラー</div>
+                        <div class="weapon-desc">近接+塗り</div>
+                    </div>
+                    <div class="weapon-card">
+                        <div class="weapon-icon">🎯</div>
+                        <div class="weapon-name">チャージャー</div>
+                        <div class="weapon-desc">溜め撃ち一撃</div>
+                    </div>
+                </div>
+                <div class="home-footer">4 vs 4 インクバトル | 90秒 | Eでボム | Qでスペシャル</div>
+            </div>
+            <div id="controls-overlay" class="hidden">
+                <div class="controls-panel">
+                    <h2>🎮 操作説明</h2>
+                    <div class="controls-grid">
+                        <div class="control-row"><span class="key">W A S D</span><span>移動</span></div>
+                        <div class="control-row"><span class="key">マウス</span><span>照準（上下左右）</span></div>
+                        <div class="control-row"><span class="key">左クリック</span><span>射撃 / チャージ溜め</span></div>
+                        <div class="control-row"><span class="key">Space</span><span>ジャンプ / 壁登り</span></div>
+                        <div class="control-row"><span class="key">Shift</span><span>イカ潜り（自チームインク上）</span></div>
+                        <div class="control-row"><span class="key">E</span><span>ミニボム投げ</span></div>
+                        <div class="control-row"><span class="key">Q</span><span>スペシャル発動</span></div>
+                        <div class="control-row"><span class="key">1 2 3</span><span>武器切替</span></div>
+                        <div class="control-row"><span class="key">R</span><span>スーパージャンプ</span></div>
+                    </div>
+                    <button id="controls-close" class="neon-btn sub-btn">閉じる</button>
+                </div>
+            </div>
+        </div>
+        <div id="countdown" class="hidden"><span id="countdown-number">3</span></div>
+        <div id="result-screen" class="hidden">
+            <h2 id="result-title"></h2>
+            <div id="result-stats">
+                <div class="result-team" id="result-team1"><span class="team-label">TEAM CYAN</span><span
+                        class="team-percent" id="result-percent1">0%</span></div>
+                <div class="result-vs">VS</div>
+                <div class="result-team" id="result-team2"><span class="team-label">TEAM MAGENTA</span><span
+                        class="team-percent" id="result-percent2">0%</span></div>
+            </div>
+            <button id="retry-btn" class="neon-btn">もう一回!</button>
+        </div>
+    </div>
+    <script type="module" src="src/main.js?v=3"></script>
+</body>
+
+</html>
