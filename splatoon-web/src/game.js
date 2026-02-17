@@ -20,6 +20,11 @@ export class Game {
         this.killFeed = [];
         this.lastHitTime = 0;
         this.damageNumbers = [];
+        
+        // Reusable vectors for performance
+        this._tempVec1 = new THREE.Vector3();
+        this._tempVec2 = new THREE.Vector3();
+        this._tempVec3 = new THREE.Vector3();
     }
 
     init() {
@@ -160,31 +165,24 @@ export class Game {
         }
 
         // Projectiles + hit detection
-        const prev = [...this.ink.list];
+        // First update projectiles (which removes dead ones from list)
         this.ink.update(dt, this.map);
 
-        for (const pr of prev) {
-            if (!pr.alive) {
-                // If it was a bomb that exploded/died
-                if (pr.isBomb && pr.hitPos) {
-                    this.particles.spawnBombExplosion(pr.hitPos, pr.tid);
-                    this.audio.playSplat();
-                    // Bomb splash damage
-                    this._checkExplosion(pr.hitPos, pr.tid, 120, 3.0);
-                } else if (pr.hitPos) {
-                    this.particles.spawnLandingSplash(pr.hitPos, pr.tid, 4);
-                    this.audio.playSplat();
-                }
-                continue;
-            }
+        // Then check collisions on remaining alive projectiles
+        // Note: iterate backwards in case we need to remove during iteration
+        for (let i = this.ink.list.length - 1; i >= 0; i--) {
+            const pr = this.ink.list[i];
+            if (!pr.alive) continue; // Skip already dead projectiles
 
             // Check direct hits for Projectiles
             if (!pr.isBomb) {
                 for (const p of this.players) {
                     if (!p.alive || p.teamId === pr.tid) continue;
-                    // Projectile collision
-                    const dist = pr.mesh.position.distanceTo(p.pos.clone().add(new THREE.Vector3(0, 1, 0)));
-                    if (dist < p.radius + 0.5) {
+                    // Projectile collision using reusable vector
+                    this._tempVec1.set(0, 1, 0).add(p.pos);
+                    const distSq = pr.mesh.position.distanceToSquared(this._tempVec1);
+                    const hitRadSq = (p.radius + 0.5) * (p.radius + 0.5);
+                    if (distSq < hitRadSq) {
                         const killed = p.takeDamage(pr.damage, pr.tid);
                         this._handleHit(pr.tid, p, pr.damage, killed);
                         this.particles.spawnSplash(pr.mesh.position, pr.tid, 5);
@@ -195,7 +193,27 @@ export class Game {
             }
         }
 
+        // Handle projectile hit effects after iteration
+        // Check which projectiles died this frame and spawn effects
+        for (let i = this.ink.list.length - 1; i >= 0; i--) {
+            const pr = this.ink.list[i];
+            if (!pr.alive && pr.hitPos) {
+                if (pr.isBomb) {
+                    this.particles.spawnBombExplosion(pr.hitPos, pr.tid);
+                    this.audio.playSplat();
+                    // Bomb splash damage
+                    this._checkExplosion(pr.hitPos, pr.tid, 120, 3.0);
+                } else {
+                    this.particles.spawnLandingSplash(pr.hitPos, pr.tid, 4);
+                    this.audio.playSplat();
+                }
+            }
+        }
+
         this.particles.update(dt);
+        
+        // Flush batched texture updates
+        this.map.flushPaint();
 
         // Kill feed cleanup
         const now = Date.now();
@@ -208,22 +226,22 @@ export class Game {
 
     _checkMelee(attacker) {
         const w = attacker.weapon;
-        const origin = attacker.pos.clone();
+        const origin = attacker.pos;
         const fwd = attacker.getForward();
 
         for (const p of this.players) {
             if (!p.alive || p.teamId === attacker.teamId) continue;
-            const dirToTarget = p.pos.clone().sub(origin);
-            const dist = dirToTarget.length();
+            this._tempVec2.copy(p.pos).sub(origin);
+            const dist = this._tempVec2.length();
             if (dist < w.meleeRange) {
-                dirToTarget.normalize();
-                const angle = fwd.angleTo(dirToTarget);
+                this._tempVec2.normalize();
+                const angle = fwd.angleTo(this._tempVec2);
                 if (angle < w.meleeArc / 2) {
                     const killed = p.takeDamage(w.meleeDamage, attacker.teamId);
                     this._handleHit(attacker.teamId, p, w.meleeDamage, killed);
                     // Push back?
-                    const push = dirToTarget.multiplyScalar(10);
-                    p.vel.add(push);
+                    this._tempVec2.multiplyScalar(10);
+                    p.vel.add(this._tempVec2);
                 }
             }
         }
@@ -252,7 +270,8 @@ export class Game {
         if (killed) {
             this.killFeed.push({ attacker: attackerTid, victim: victim.teamId, time: Date.now() });
             this._addScore(attackerTid, 1); // Kill score?
-            this.particles.spawnKillEffect(victim.pos.clone().add(new THREE.Vector3(0, 1, 0)), attackerTid);
+            this._tempVec3.set(0, 1, 0).add(victim.pos);
+            this.particles.spawnKillEffect(this._tempVec3, attackerTid);
             this.audio.playSplat(); // Kill sound
         }
     }

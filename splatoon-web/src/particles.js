@@ -1,18 +1,69 @@
 import * as THREE from 'three';
 import { TEAM_HEX } from './map.js';
 
+// Cached materials and geometries for performance
+const MATERIAL_CACHE = new Map();
+const GEOMETRY_CACHE = new Map();
+
+function getCachedMaterial(tid, type = 'basic') {
+    const c = TEAM_HEX[tid] || 0xffffff;
+    const key = `${tid}_${type}`;
+    if (!MATERIAL_CACHE.has(key)) {
+        if (type === 'basic') {
+            MATERIAL_CACHE.set(key, new THREE.MeshBasicMaterial({ color: c }));
+        } else if (type === 'flash') {
+            MATERIAL_CACHE.set(key, new THREE.MeshBasicMaterial({ 
+                color: 0xffffff, transparent: true, opacity: 0.8 
+            }));
+        } else if (type === 'aura') {
+            MATERIAL_CACHE.set(key, new THREE.MeshBasicMaterial({ 
+                color: c, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending 
+            }));
+        } else if (type === 'ring') {
+            MATERIAL_CACHE.set(key, new THREE.MeshBasicMaterial({ 
+                color: c, transparent: true, opacity: 0.8, side: THREE.DoubleSide 
+            }));
+        } else if (type === 'pillar') {
+            MATERIAL_CACHE.set(key, new THREE.MeshBasicMaterial({ 
+                color: c, transparent: true, opacity: 0.6, side: THREE.DoubleSide, 
+                blending: THREE.AdditiveBlending 
+            }));
+        }
+    }
+    return MATERIAL_CACHE.get(key);
+}
+
+function getCachedGeometry(type, ...params) {
+    const key = `${type}_${params.join('_')}`;
+    if (!GEOMETRY_CACHE.has(key)) {
+        if (type === 'box') {
+            GEOMETRY_CACHE.set(key, new THREE.BoxGeometry(1, 1, 1));
+        } else if (type === 'sphere') {
+            GEOMETRY_CACHE.set(key, new THREE.SphereGeometry(...params));
+        } else if (type === 'ring') {
+            const geo = new THREE.RingGeometry(...params);
+            geo.rotateX(-Math.PI / 2);
+            GEOMETRY_CACHE.set(key, geo);
+        } else if (type === 'cylinder') {
+            GEOMETRY_CACHE.set(key, new THREE.CylinderGeometry(...params));
+        }
+    }
+    return GEOMETRY_CACHE.get(key);
+}
+
 export class ParticleSystem {
     constructor(scene) {
         this.scene = scene;
         this.list = [];
-        // Pool geometries/materials if needed, but for now just instantiate
-        this.boxGeo = new THREE.BoxGeometry(1, 1, 1);
+        this.maxParticles = 200; // Limit particle count
+        // Use cached box geometry
+        this.boxGeo = getCachedGeometry('box');
     }
 
     // Standard hit splash - REDUCED COUNT
     spawnSplash(pos, tid, count = 5) {
-        const c = TEAM_HEX[tid] || 0xffffff;
-        const mat = new THREE.MeshBasicMaterial({ color: c });
+        this._enforceParticleLimit(count);
+        const mat = getCachedMaterial(tid, 'basic');
         for (let i = 0; i < count; i++) {
             const size = 0.1 + Math.random() * 0.15; // Slightly smaller
             const mesh = new THREE.Mesh(this.boxGeo, mat);
@@ -31,8 +82,8 @@ export class ParticleSystem {
 
     // Landing splash (flat) - REDUCED COUNT
     spawnLandingSplash(pos, tid, count = 4) {
-        const c = TEAM_HEX[tid] || 0xffffff;
-        const mat = new THREE.MeshBasicMaterial({ color: c });
+        this._enforceParticleLimit(count);
+        const mat = getCachedMaterial(tid, 'basic');
         for (let i = 0; i < count; i++) {
             const size = 0.1 + Math.random() * 0.1;
             const mesh = new THREE.Mesh(this.boxGeo, mat);
@@ -49,12 +100,12 @@ export class ParticleSystem {
 
     // KILL EFFECT - Big Explosion
     spawnKillEffect(pos, tid) {
-        const c = TEAM_HEX[tid] || 0xffffff;
-        const mat = new THREE.MeshBasicMaterial({ color: c });
-        const flashMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+        this._enforceParticleLimit(13);
+        const mat = getCachedMaterial(tid, 'basic');
+        const flashMat = getCachedMaterial(0, 'flash');
 
         // Initial flash sphere
-        const flash = new THREE.Mesh(new THREE.SphereGeometry(1.5, 8, 8), flashMat);
+        const flash = new THREE.Mesh(getCachedGeometry('sphere', 1.5, 8, 8), flashMat);
         flash.position.copy(pos);
         this.scene.add(flash);
         this.list.push({ mesh: flash, vel: new THREE.Vector3(), age: 0, life: 0.3, type: 'flash', scaleSpd: 8 });
@@ -77,11 +128,10 @@ export class ParticleSystem {
 
     // BOMB EXPLOSION
     spawnBombExplosion(pos, tid) {
-        const c = TEAM_HEX[tid] || 0xffffff;
+        this._enforceParticleLimit(2);
         // Shockwave ring
-        const ringGeo = new THREE.RingGeometry(0.5, 1.0, 16);
-        ringGeo.rotateX(-Math.PI / 2);
-        const ringMat = new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
+        const ringGeo = getCachedGeometry('ring', 0.5, 1.0, 16);
+        const ringMat = getCachedMaterial(tid, 'ring');
         const ring = new THREE.Mesh(ringGeo, ringMat);
         ring.position.copy(pos); ring.position.y += 0.2;
         this.scene.add(ring);
@@ -89,8 +139,8 @@ export class ParticleSystem {
 
         // Upward pillar
         const cylinder = new THREE.Mesh(
-            new THREE.CylinderGeometry(1, 2, 4, 8, 1, true),
-            new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.6, side: THREE.DoubleSide, blending: THREE.AdditiveBlending })
+            getCachedGeometry('cylinder', 1, 2, 4, 8, 1, true),
+            getCachedMaterial(tid, 'pillar')
         );
         cylinder.position.copy(pos); cylinder.position.y += 2;
         this.scene.add(cylinder);
@@ -102,9 +152,9 @@ export class ParticleSystem {
 
     // SPECIAL AURA (continuous spawn)
     spawnSpecialAura(player) {
+        this._enforceParticleLimit(1);
         // Reduced frequency check should be done by caller, but here we just spawn one
-        const c = TEAM_HEX[player.teamId] || 0xffff00;
-        const mat = new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending });
+        const mat = getCachedMaterial(player.teamId, 'aura');
         const size = 0.15;
         const mesh = new THREE.Mesh(this.boxGeo, mat);
         mesh.scale.setScalar(size);
@@ -117,6 +167,16 @@ export class ParticleSystem {
         this.list.push({ mesh, vel, age: 0, life: 0.8, type: 'aura' });
     }
 
+    _enforceParticleLimit(newCount) {
+        // Remove oldest particles if we exceed limit
+        while (this.list.length + newCount > this.maxParticles) {
+            const p = this.list.shift();
+            if (p && p.mesh) {
+                this.scene.remove(p.mesh);
+            }
+        }
+    }
+
     update(dt) {
         // Limit updates if too many?
         for (let i = this.list.length - 1; i >= 0; i--) {
@@ -124,8 +184,7 @@ export class ParticleSystem {
             p.age += dt;
             if (p.age >= p.life) {
                 this.scene.remove(p.mesh);
-                if (p.mesh.geometry !== this.boxGeo) p.mesh.geometry.dispose(); // Only dispose if unique
-                if (p.mesh.material) p.mesh.material.dispose();
+                // Don't dispose shared geometries/materials
                 this.list.splice(i, 1);
                 continue;
             }
@@ -176,8 +235,7 @@ export class ParticleSystem {
     reset() {
         this.list.forEach(p => {
             this.scene.remove(p.mesh);
-            if (p.mesh.geometry !== this.boxGeo) p.mesh.geometry.dispose();
-            if (p.mesh.material) p.mesh.material.dispose();
+            // Don't dispose shared geometries/materials
         });
         this.list = [];
     }

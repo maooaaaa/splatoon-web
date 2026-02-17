@@ -4,6 +4,11 @@ import { InputManager } from './input.js';
 import { AudioManager } from './audio.js';
 import { UIManager } from './ui.js';
 
+// Reusable vectors for camera collision
+const _camHead = new THREE.Vector3();
+const _camDir = new THREE.Vector3();
+const _camTarget = new THREE.Vector3();
+
 // ===== Three.js Setup =====
 const canvas = document.getElementById('game-canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
@@ -180,10 +185,10 @@ function play(dt) {
 
     // Collision
     let cx = idealX, cy_ = idealY, cz = idealZ;
-    const head = new THREE.Vector3(p.pos.x, p.pos.y + 1.8, p.pos.z);
+    _camHead.set(p.pos.x, p.pos.y + 1.8, p.pos.z);
 
-    const dir = new THREE.Vector3(cx - head.x, cy_ - head.y, cz - head.z);
-    const len = dir.length(); dir.normalize();
+    _camDir.set(cx - _camHead.x, cy_ - _camHead.y, cz - _camHead.z);
+    const len = _camDir.length(); _camDir.normalize();
     let hitLen = len;
 
     for (const w of game.map.walls) {
@@ -191,9 +196,9 @@ function play(dt) {
         if (Math.abs(w.minX - p.pos.x) > 20 && Math.abs(w.minZ - p.pos.z) > 20) continue;
 
         for (let t = 0.5; t < len; t += 0.8) { // Coarser steps for optimization
-            const tx = head.x + dir.x * t;
-            const ty = head.y + dir.y * t;
-            const tz = head.z + dir.z * t;
+            const tx = _camHead.x + _camDir.x * t;
+            const ty = _camHead.y + _camDir.y * t;
+            const tz = _camHead.z + _camDir.z * t;
             if (tx >= w.minX && tx <= w.maxX && tz >= w.minZ && tz <= w.maxZ && ty < w.topY) {
                 hitLen = Math.min(hitLen, Math.max(1.0, t - 0.5));
                 break;
@@ -201,19 +206,19 @@ function play(dt) {
         }
     }
 
-    cx = head.x + dir.x * hitLen;
-    cy_ = head.y + dir.y * hitLen;
-    cz = head.z + dir.z * hitLen;
+    cx = _camHead.x + _camDir.x * hitLen;
+    cy_ = _camHead.y + _camDir.y * hitLen;
+    cz = _camHead.z + _camDir.z * hitLen;
 
     const gy = game.map.getGroundY(cx, cz) + 0.5;
     if (cy_ < gy) cy_ = gy;
 
-    const targetPos = new THREE.Vector3(cx, cy_, cz);
+    _camTarget.set(cx, cy_, cz);
 
     if (!camInitialized) {
-        smoothCamPos.copy(targetPos); camInitialized = true;
+        smoothCamPos.copy(_camTarget); camInitialized = true;
     } else {
-        smoothCamPos.lerp(targetPos, 20 * dt);
+        smoothCamPos.lerp(_camTarget, 20 * dt);
     }
 
     camera.position.copy(smoothCamPos);

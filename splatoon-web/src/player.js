@@ -57,6 +57,16 @@ export class Player {
         this.wallClimbTimer = 0;
         // Animation
         this.walkBob = 0;
+        
+        // Reusable vectors for performance
+        this._fwd = new THREE.Vector3();
+        this._rgt = new THREE.Vector3();
+        this._dir = new THREE.Vector3();
+        this._ahead = new THREE.Vector3();
+        this._sideL = new THREE.Vector3();
+        this._sideR = new THREE.Vector3();
+        this._offset = new THREE.Vector3();
+        
         this._build();
     }
 
@@ -150,18 +160,26 @@ export class Player {
     }
 
     setPos(x, y, z) { this.pos.set(x, y, z); this.group.position.copy(this.pos); }
-    getForward() { return new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)); }
-    getShootOrigin() { const f = this.getForward(); return new THREE.Vector3(this.pos.x + f.x * 0.8, this.pos.y + 1.2, this.pos.z + f.z * 0.8); }
+    getForward() { 
+        this._fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+        return this._fwd;
+    }
+    getShootOrigin() { 
+        const f = this.getForward(); 
+        this._offset.set(this.pos.x + f.x * 0.8, this.pos.y + 1.2, this.pos.z + f.z * 0.8);
+        return this._offset;
+    }
     getShootDir() {
         const w = this.weapon;
         const sp = w.type === 'charger' ? w.spread * (1 - this.chargeLevel * 0.8) : w.spread;
         const spreadX = (Math.random() - 0.5) * sp;
         const spreadZ = (Math.random() - 0.5) * sp;
-        return new THREE.Vector3(
+        this._dir.set(
             -Math.sin(this.yaw) + spreadX,
             Math.sin(this.pitch), // FULL pitch - no dampening
             -Math.cos(this.yaw) + spreadZ
         ).normalize();
+        return this._dir;
     }
 
     takeDamage(amount, attackerTeamId) {
@@ -204,21 +222,21 @@ export class Player {
         }
 
         const spd = this.isSquid ? this.speed * 1.6 : this.speed;
-        const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-        const rgt = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
-        const dir = new THREE.Vector3().addScaledVector(fwd, move.z).addScaledVector(rgt, move.x);
-        if (dir.length() > 0) dir.normalize();
+        this._fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+        this._rgt.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+        this._dir.set(0, 0, 0).addScaledVector(this._fwd, move.z).addScaledVector(this._rgt, move.x);
+        if (this._dir.length() > 0) this._dir.normalize();
 
-        this.vel.x = dir.x * spd; this.vel.z = dir.z * spd;
+        this.vel.x = this._dir.x * spd; this.vel.z = this._dir.z * spd;
 
         // Wall climbing
         this.wallClimbing = false;
         if (!this.onGround && move.jump) {
-            const ahead = new THREE.Vector3(this.pos.x + fwd.x * 1.5, 0, this.pos.z + fwd.z * 1.5);
-            const sideL = new THREE.Vector3(this.pos.x + rgt.x * 1.5, 0, this.pos.z + rgt.z * 1.5);
-            const sideR = new THREE.Vector3(this.pos.x - rgt.x * 1.5, 0, this.pos.z - rgt.z * 1.5);
-            const touchingWall = !map.isWalkable(ahead.x, ahead.z) ||
-                !map.isWalkable(sideL.x, sideL.z) || !map.isWalkable(sideR.x, sideR.z);
+            this._ahead.set(this.pos.x + this._fwd.x * 1.5, 0, this.pos.z + this._fwd.z * 1.5);
+            this._sideL.set(this.pos.x + this._rgt.x * 1.5, 0, this.pos.z + this._rgt.z * 1.5);
+            this._sideR.set(this.pos.x - this._rgt.x * 1.5, 0, this.pos.z - this._rgt.z * 1.5);
+            const touchingWall = !map.isWalkable(this._ahead.x, this._ahead.z) ||
+                !map.isWalkable(this._sideL.x, this._sideL.z) || !map.isWalkable(this._sideR.x, this._sideR.z);
             if (touchingWall && this.wallClimbTimer < 1.0) {
                 this.wallClimbing = true; this.wallClimbTimer += dt; this.vel.y = 12;
             }
@@ -320,7 +338,7 @@ export class Player {
         // Animations
         this.group.position.copy(this.pos);
         this.group.rotation.y = this.yaw;
-        if (dir.length() > 0 && !this.isSquid) {
+        if (this._dir.length() > 0 && !this.isSquid) {
             this.walkBob += dt * 12;
             this.body.position.y = 1.2 + Math.sin(this.walkBob) * 0.05;
             if (this.lLeg && this.rLeg) {

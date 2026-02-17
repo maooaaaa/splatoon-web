@@ -1,6 +1,39 @@
 import * as THREE from 'three';
 import { TEAM_HEX } from './map.js';
 
+// Cached geometries and materials for performance
+const GEOMETRY_CACHE = new Map();
+const MATERIAL_CACHE = new Map();
+
+function getCachedGeometry(type, size) {
+    const key = `${type}_${size.toFixed(3)}`;
+    if (!GEOMETRY_CACHE.has(key)) {
+        if (type === 'sphere') {
+            GEOMETRY_CACHE.set(key, new THREE.SphereGeometry(size, 8, 8));
+        } else if (type === 'tetrahedron') {
+            GEOMETRY_CACHE.set(key, new THREE.TetrahedronGeometry(size));
+        }
+    }
+    return GEOMETRY_CACHE.get(key);
+}
+
+function getCachedMaterial(tid, type = 'standard') {
+    const c = TEAM_HEX[tid] || 0xffffff;
+    const key = `${tid}_${type}`;
+    if (!MATERIAL_CACHE.has(key)) {
+        if (type === 'standard') {
+            MATERIAL_CACHE.set(key, new THREE.MeshStandardMaterial({ 
+                color: c, emissive: c, emissiveIntensity: 0.5, roughness: 0.2 
+            }));
+        } else if (type === 'bomb') {
+            MATERIAL_CACHE.set(key, new THREE.MeshStandardMaterial({ 
+                color: c, emissive: c, emissiveIntensity: 0.8, roughness: 0.1 
+            }));
+        }
+    }
+    return MATERIAL_CACHE.get(key);
+}
+
 export class InkBase {
     constructor(scene, pos, tid, damage, paintRad, isBomb = false) {
         this.scene = scene; this.tid = tid; this.damage = damage;
@@ -10,7 +43,10 @@ export class InkBase {
     }
     update(dt, map) { }
     destroy() {
-        if (this.mesh) { this.scene.remove(this.mesh); this.mesh.geometry.dispose(); this.mesh.material.dispose(); }
+        if (this.mesh) { 
+            this.scene.remove(this.mesh); 
+            // Don't dispose shared geometry/material
+        }
         this.alive = false;
     }
 }
@@ -18,10 +54,10 @@ export class InkBase {
 export class InkProjectile extends InkBase {
     constructor(scene, pos, dir, tid, spd, paintRad, projSize, damage) {
         super(scene, pos, tid, damage, paintRad);
-        const c = TEAM_HEX[tid] || 0xffffff;
+        // Use cached geometry and material
         this.mesh = new THREE.Mesh(
-            new THREE.SphereGeometry(projSize, 8, 8),
-            new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.5, roughness: 0.2 })
+            getCachedGeometry('sphere', projSize),
+            getCachedMaterial(tid, 'standard')
         );
         this.mesh.position.copy(pos);
         this.scene.add(this.mesh);
@@ -72,12 +108,11 @@ export class InkBomb extends InkBase {
     constructor(scene, pos, dir, tid) {
         // Bomb: more damage, bigger radius
         super(scene, pos, tid, 120, 5.0, true);
-        const c = TEAM_HEX[tid] || 0xffffff;
-
-        // Bomb mesh: Pyramid shape
+        
+        // Use cached geometry and material
         this.mesh = new THREE.Mesh(
-            new THREE.TetrahedronGeometry(0.4),
-            new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.8, roughness: 0.1 })
+            getCachedGeometry('tetrahedron', 0.4),
+            getCachedMaterial(tid, 'bomb')
         );
         this.mesh.position.copy(pos);
         this.scene.add(this.mesh);
